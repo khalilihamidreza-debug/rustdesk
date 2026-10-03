@@ -1,0 +1,62 @@
+name: Build Custom RustDesk Windows
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    env:
+      RENDEZVOUS_SERVER: ${{ secrets.RENDEZVOUS_SERVER }}
+      RS_PUB_KEY: ${{ secrets.RS_PUB_KEY }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Patch Configuration Directly
+        shell: pwsh
+        run: |
+          $server = "${{ secrets.RENDEZVOUS_SERVER }}".Trim()
+          $key = "${{ secrets.RS_PUB_KEY }}".Trim()
+          
+          # مسیر فایل‌های کانفیگ هسته Rust
+          $cfgFiles = @(
+              "libs/hbb_common/src/config.rs",
+              "src/server.rs"
+          )
+          
+          foreach ($file in $cfgFiles) {
+              if (Test-Path $file) {
+                  Write-Host "Patching $file..."
+                  (Get-Content $file) -replace 'pub const RENDEZVOUS_SERVERS: &\[&str\] = &\[.*\];', "pub const RENDEZVOUS_SERVERS: &[&str] = &[`"$server`"];" `
+                                      -replace 'pub const RS_PUB_KEY: &str = ".*";', "pub const RS_PUB_KEY: &str = `"$key`";" | Set-Content $file
+              }
+          }
+          Write-Host "Config hardcoded successfully."
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.5'
+          cache: true
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build Windows Executable
+        shell: pwsh
+        run: |
+          flutter pub get
+          # کامپایل کتابخانه‌های Rust و سپس بیلد فلاتر برای ویندوز
+          cargo build --release --lib
+          flutter build windows --release
+
+      - name: Upload Windows EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: RustDesk-Custom-Windows-Exe
+          path: build/windows/x64/runner/Release/
